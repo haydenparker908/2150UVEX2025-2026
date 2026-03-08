@@ -7,7 +7,7 @@ using namespace vex;
 competition Competition;
 
 // ---------------- MOTORS ----------------
-motor LeftFront(PORT11, ratio6_1, true);
+motor LeftFront(PORT11, ratio6_1, true); //trueisreversed falseisnormal
 motor LeftBack(PORT12, ratio6_1, true);
 motor RightFront(PORT13, ratio6_1, false);
 motor RightBack(PORT14, ratio6_1, false);
@@ -70,46 +70,81 @@ double getDrivePosition() {
 }
 
 // ---------------- DRIVE PID ----------------
+// Moves the robot forward/backward a specified distance using PID control
+// Parameters:
+//   - inches: distance to move (positive = forward, negative = backward)
+//   - timeout: maximum time in milliseconds before stopping (default 3000ms)
 void drivePID(double inches, int timeout = 3000) {
 
+    // Reset all wheel encoders to zero to start from a clean state
     resetDriveEncoders();
 
+    // Convert inches to motor degrees using the wheel circumference
     double target = inches * degreesPerInch;
+    
+    // Initialize error (difference between target and current position)
     double error = target;
+    
+    // Store previous error for calculating derivative (rate of change)
     double prevError = error;
+    
+    // Accumulator for integral (sum of all errors over time)
     double integral = 0;
+    
+    // Track elapsed time to enforce timeout
     int elapsed = 0;
 
+    // Continue until error is small enough (within 3 degrees) OR timeout is reached
     while (fabs(error) > 3 && elapsed < timeout) {
 
+        // Get average position of all four drive wheels
         double position = getDrivePosition();
+        
+        // Calculate current error: how far off we are from target
         error = target - position;
 
+        // Only accumulate integral if error is small enough (prevents wind-up)
+        // If error is large, reset integral to 0 to avoid overshoot
         if (fabs(error) < 200)
-            integral += error;
+            integral += error;  // Add current error to running total
         else
-            integral = 0;
+            integral = 0;       // Reset if error is too large
 
+        // Clamp integral to prevent it from growing too large
+        // Limits the max contribution of the I term
         if (integral > 5000) integral = 5000;
         if (integral < -5000) integral = -5000;
 
+        // Calculate derivative: how fast the error is changing
+        // Used to dampen motion and reduce oscillation
         double derivative = error - prevError;
 
+        // Calculate motor power using PID formula:
+        // P term: proportional to current error (main correction)
+        // I term: proportional to accumulated error (eliminate steady-state)
+        // D term: proportional to rate of error change (dampen overshoot)
         double power =
-            error * kP_drive +
-            integral * kI_drive +
-            derivative * kD_drive;
+            error * kP_drive +       // Proportional component
+            integral * kI_drive +    // Integral component
+            derivative * kD_drive;   // Derivative component
 
+        // Apply calculated power to all four drive motors
         spinMotor(LeftFront, power);
         spinMotor(LeftBack, power);
         spinMotor(RightFront, power);
         spinMotor(RightBack, power);
 
+        // Save current error for next derivative calculation
         prevError = error;
+        
+        // Wait 20ms before next calculation (50Hz control loop)
         wait(20, msec);
+        
+        // Increment elapsed time counter for timeout check
         elapsed += 20;
     }
 
+    // Stop all motors with hold brake to prevent slipping after reaching target
     LeftFront.stop(hold);
     LeftBack.stop(hold);
     RightFront.stop(hold);
